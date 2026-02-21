@@ -1,7 +1,8 @@
 import os
 import json
 import requests
-from typing import Any, Dict, Optional, Union
+from datetime import date, datetime
+from typing import Any, Dict, Optional, Union, List
 
 from langchain_core.tools import tool
 
@@ -37,6 +38,11 @@ def _normalize_payload_json(payload_json: Optional[Union[Dict[str, Any], str]]) 
     return {"note": str(payload_json)}
 
 
+def _parse_date_iso(value: str) -> date:
+    """Parse YYYY-MM-DD into a date."""
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
 # Tool1 – Policy RAG Lookup
 @tool
 def policy_lookup(policy_group: str, query: str, top_k: int = 4) -> Dict[str, Any]:
@@ -46,6 +52,64 @@ def policy_lookup(policy_group: str, query: str, top_k: int = 4) -> Dict[str, An
     r = requests.post(url, json=body, timeout=20)
     r.raise_for_status()
     return r.json()
+
+
+# Tool4 – Eligibility Engine (deterministic)
+@tool
+def eligibility_engine(
+    available_units: float,
+    requested_units: float,
+    start_date: str,
+    advance_days_required: int,
+    max_consecutive: int,
+    manager_id: str,
+    dept_head_id: Optional[str] = None,
+    today: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic leave eligibility check.
+
+    Rules:
+    1) Reject if available_units < requested_units
+    2) Reject if today + advance_days_required > start_date
+    3) Reject if requested_units > max_consecutive
+
+    Approval chain:
+    - Default manager
+    - If requested_units > 3 days, add dept head
+    """
+    run_date = _parse_date_iso(today) if today else date.today()
+    start = _parse_date_iso(start_date)
+    min_submit_date = run_date.fromordinal(run_date.toordinal() + advance_days_required)
+
+    reasons: List[str] = []
+    if available_units < requested_units:
+        reasons.append("Insufficient leave balance")
+    if min_submit_date > start:
+        reasons.append("Advance notice requirement not met")
+    if requested_units > max_consecutive:
+        reasons.append("Requested units exceed max consecutive limit")
+
+    approval_chain = [manager_id]
+    if requested_units > 3 and dept_head_id:
+        approval_chain.append(dept_head_id)
+
+    return {
+        "eligible": len(reasons) == 0,
+        "reasons": reasons,
+        "balance_snapshot": {
+            "available_units": available_units,
+            "requested_units": requested_units,
+            "remaining_if_approved": available_units - requested_units,
+        },
+        "normalized_form": {
+            "today": run_date.isoformat(),
+            "start_date": start.isoformat(),
+            "advance_days_required": advance_days_required,
+            "max_consecutive": max_consecutive,
+        },
+        "approval_chain": approval_chain,
+    }
 
 
 # Tool2 – People Directory Lookup
@@ -59,6 +123,15 @@ def directory_lookup(lookup_by: str, value: str) -> Dict[str, Any]:
     else:
         raise ValueError("lookup_by must be 'email' or 'employee_id'")
 
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+@tool
+def leave_balance_lookup(employee_id: str, leave_type: str = "ANNUAL") -> Dict[str, Any]:
+    """Get leave balance for one leave type."""
+    url = f"{API_BASE}/leave-balances/{employee_id}/{leave_type}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     return r.json()
