@@ -118,7 +118,7 @@ class LeaveBalanceItem(BaseModel):
 
 class CaseCreateRequest(BaseModel):
     requester_id: str
-    case_type: str  # "LEAVE_REQUEST" | "GENERAL_REQUEST"
+    case_type: str  # LEAVE_REQUEST, LEAVE_CANCEL, LEAVE_CHANGE, LEAVE_TRANSFER, LEAVE_RESUBMISSION
     payload_json: dict[str, Any]
 
 class CasePatchRequest(BaseModel):
