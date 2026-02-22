@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from time import perf_counter
 from pathlib import Path
 from typing import Any, Dict, List, TypedDict
 
@@ -44,8 +45,11 @@ def _append_log(log_path: str, title: str, content: str) -> None:
 
 
 def _build_system_prompt(user_profile: Dict[str, Any]) -> str:
+    today_str = datetime.now().date().isoformat()
     employee = user_profile.get("employee_profile", {})
     manager = user_profile.get("manager_profile") or {}
+    skip_manager = user_profile.get("skip_manager_profile") or {}
+    hrbp = user_profile.get("hrbp_profile") or {}
 
     return f"""
 You are LeaveAgentDemo.
@@ -56,8 +60,13 @@ General Rule (must follow):
 3) For QA answers, you must use internal document support first.
    - Use policy_lookup for evidence.
    - If doc support is insufficient, do not answer as fact; say not supported yet.
-4) For non-QA requests, you must create a case record.
+4) For non-QA requests, you must use internal document support first and then based on the validation of user request with document support, create a case record.
 5) Before submitting (case_update to PENDING_APPROVAL), ask user confirmation first.
+6) Minimize repeated questions. You may ask clarification only when a required field is missing.
+7) Ask confirmation only once per submission action.
+8) If the user has already confirmed (yes/ok/确认), execute submission directly and do not ask confirmation again.
+9) For leave submission, you must run eligibility_engine before submitting.
+10) Default today as {today_str}. If user gives partial date (e.g. 3/5), infer year from today and keep future-oriented.
 
 User Identity (trusted):
 - employee_id: {employee.get('employee_id')}
@@ -66,25 +75,93 @@ User Identity (trusted):
 - leave_policy_group: {employee.get('leave_policy_group')}
 - manager_id: {manager.get('employee_id')}
 - manager_email: {manager.get('email')}
+- skip_manager_id: {skip_manager.get('employee_id')}
+- skip_manager_email: {skip_manager.get('email')}
+- hrbp_id: {hrbp.get('employee_id')}
+- hrbp_email: {hrbp.get('email')}
 
 Available tools and what each does:
-- directory_lookup(lookup_by, value): query employee profile and manager profile.
+- directory_lookup(lookup_by, value): query employee profile + manager + skip-manager + HRBP.
 - policy_lookup(policy_group, query, top_k): retrieve internal policy chunks with similarity scores.
 - leave_balance_lookup(employee_id, leave_type): query actual leave balance in system. leave type only can be ANNUAL or SICK.
 - case_create(requester_id, case_type, payload_json): create DRAFT case.
 - case_update(case_id, status, payload_json?): update case status/payload.
 - eligibility_engine(...): deterministic leave checks; returns eligibility and approval chain.
 
-Case type constraint for this demo:
-- LEAVE_REQUEST for leave execution.
-- GENERAL_REQUEST for other non-QA requests.
+Tool Contracts (Pydantic-style, follow these shapes):
+class PolicyRetrieveRequest(BaseModel):
+    policy_group: str
+    query: str
+    top_k: int = 4
+
+class PersonProfile(BaseModel):
+    employee_id: str
+    name: str
+    email: str
+    employment_type: str
+    location: str
+    department: str
+    grade: str
+    leave_policy_group: str
+    manager_id: str | None = None
+
+class DirectoryResponse(BaseModel):
+    employee_profile: PersonProfile
+    manager_profile: PersonProfile | None = None
+    skip_manager_profile: PersonProfile | None = None
+    hrbp_profile: PersonProfile | None = None
+
+class LeaveBalanceItem(BaseModel):
+    employee_id: str
+    leave_type: str  # "ANNUAL" | "SICK"
+    available_units: float
+
+class CaseCreateRequest(BaseModel):
+    requester_id: str
+    case_type: str  # "LEAVE_REQUEST" | "GENERAL_REQUEST"
+    payload_json: dict[str, Any]
+
+class CasePatchRequest(BaseModel):
+    status: str | None = None  # "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
+    payload_json: dict[str, Any] | None = None
+
+class ApprovalRule(BaseModel):
+    condition: str
+    approvers: list[str]
+
+class Citation(BaseModel):
+    doc_name: str
+    chunk_index: int
+    quote: str
+
+class LeavePolicy(BaseModel):
+    min_unit: float
+    advance_days_required: int
+    max_consecutive_days: int
+    approval_rules: list[ApprovalRule]
+    citations: list[Citation]
+
+class PolicyExtractionResult(BaseModel):
+    policy_type: str  # "leave_policy"
+    policy_group: str
+    is_applicable: bool
+    applicability_reason: str
+    data: LeavePolicy | None = None
 
 Behavior:
 - Be concise.
 - Use tools; do not fabricate.
+- Prefer the profile chain fields (manager/skip_manager/hrbp) when user asks approvers.
+- Avoid repeated "您好/请问..." style openings in same request flow.
+- If required fields already exist in history, do not ask them again.
 - If user asks unrelated tasks and no doc support, say:
   "目前还不支持这项工作，可以试试让我帮你提交工单。"
 """.strip()
+
+
+def _normalize_user_turn(messages: List[BaseMessage], user_text: str) -> str:
+    _ = messages
+    return user_text
 
 
 def build_graph(llm_with_tools, system_prompt: str, log_path: str):
@@ -121,12 +198,52 @@ def build_graph(llm_with_tools, system_prompt: str, log_path: str):
             if name not in TOOL_MAP:
                 raise RuntimeError(f"Unknown tool call: {name}")
 
-            result = TOOL_MAP[name].invoke(args)
-            _append_log(
-                log_path,
-                f"TOOL::{name}",
-                json.dumps({"args": args, "result": result}, ensure_ascii=False, indent=2, default=str),
-            )
+            started_at = datetime.now().isoformat(timespec="milliseconds")
+            t0 = perf_counter()
+            try:
+                result = TOOL_MAP[name].invoke(args)
+                elapsed_ms = round((perf_counter() - t0) * 1000, 2)
+                ended_at = datetime.now().isoformat(timespec="milliseconds")
+                _append_log(
+                    log_path,
+                    f"TOOL::{name}",
+                    json.dumps(
+                        {
+                            "tool_name": name,
+                            "args": args,
+                            "started_at": started_at,
+                            "ended_at": ended_at,
+                            "elapsed_ms": elapsed_ms,
+                            "success": True,
+                            "result": result,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    ),
+                )
+            except Exception as e:
+                elapsed_ms = round((perf_counter() - t0) * 1000, 2)
+                ended_at = datetime.now().isoformat(timespec="milliseconds")
+                _append_log(
+                    log_path,
+                    f"TOOL::{name}",
+                    json.dumps(
+                        {
+                            "tool_name": name,
+                            "args": args,
+                            "started_at": started_at,
+                            "ended_at": ended_at,
+                            "elapsed_ms": elapsed_ms,
+                            "success": False,
+                            "error": str(e),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    ),
+                )
+                raise
             out_messages.append(
                 ToolMessage(
                     content=json.dumps(result, ensure_ascii=False, default=str),
@@ -190,7 +307,9 @@ def main() -> None:
             continue
 
         _append_log(log_path, "USER", user_text)
-        messages = [*messages, HumanMessage(content=user_text)]
+        normalized_user_text = _normalize_user_turn(messages, user_text)
+        _append_log(log_path, "USER_NORMALIZED", normalized_user_text)
+        messages = [*messages, HumanMessage(content=normalized_user_text)]
 
         out = app.invoke({"messages": messages})
         messages = out["messages"]
