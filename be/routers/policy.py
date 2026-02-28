@@ -14,7 +14,7 @@ router = APIRouter(prefix="/policy", tags=["policy"])
 
 @router.post("/ingest")
 def ingest_policy(payload: PolicyIngestRequest, session: Session = Depends(get_session)):
-    default_doc = Path(__file__).resolve().parents[1] / "policies" / "annual_leave_fte_cn_gz.md"
+    default_doc = Path(__file__).resolve().parents[1] / "policies" / "leave_policy_fte_cn_gz.md"
     doc_path = payload.doc_path or str(default_doc)
 
     try:
