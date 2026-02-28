@@ -32,6 +32,7 @@ def get_one_balance(employee_id: str, leave_type: str, session: Session = Depend
         )
     ).first()
     if not row:
-        raise HTTPException(status_code=404, detail="Leave balance not found")
+        # Return zero balance instead of 404 so agent workflows can continue deterministically.
+        return LeaveBalanceItem(employee_id=employee_id, leave_type=leave_type, available_units=0.0)
 
     return LeaveBalanceItem(employee_id=row.employee_id, leave_type=row.leave_type, available_units=row.available_units)

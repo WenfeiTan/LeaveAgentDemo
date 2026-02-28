@@ -19,6 +19,8 @@ class PersonProfile(BaseModel):
 class DirectoryResponse(BaseModel):
     employee_profile: PersonProfile
     manager_profile: Optional[PersonProfile] = None
+    skip_manager_profile: Optional[PersonProfile] = None
+    hrbp_profile: Optional[PersonProfile] = None
 
 
 # -------- Leave Balances --------

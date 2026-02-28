@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from typing import List, Literal, Optional
+from typing import Callable, List, Literal, Optional
 
 from pydantic import BaseModel
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -40,7 +40,12 @@ class PolicyExtractionResult(BaseModel):
     data: Optional[LeavePolicy] = None
 
 
-def run_policy_rag(query: str, policy_group: str = "FTE_CN_GZ", top_k: int = 4) -> PolicyExtractionResult:
+def run_policy_rag(
+    query: str,
+    policy_group: str = "FTE_CN_GZ",
+    top_k: int = 4,
+    debug_log: Optional[Callable[[str, str], None]] = None,
+) -> PolicyExtractionResult:
     retrieval = policy_lookup.invoke({"policy_group": policy_group, "query": query, "top_k": top_k})
     chunks = retrieval["chunks"]
 
@@ -79,8 +84,13 @@ Policy group: {policy_group}
 Retrieved chunks:
 {context_text}
 """
+    if debug_log:
+        debug_log("policy_rag_prompt", prompt)
 
-    return structured_llm.invoke(prompt)
+    result = structured_llm.invoke(prompt)
+    if debug_log:
+        debug_log("policy_rag_result", json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
+    return result
 
 
 if __name__ == "__main__":

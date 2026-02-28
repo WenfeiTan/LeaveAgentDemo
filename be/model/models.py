@@ -33,7 +33,7 @@ class Employees(SQLModel, table=True):
     __tablename__ = "employees"
     __table_args__ = {"schema": "public"}
 
-    employee_id: int = Field(sa_column=Column(String, primary_key=True))
+    employee_id: str = Field(sa_column=Column(String, primary_key=True))
     name: str = Field(sa_column=Column(String, nullable=False))
     email: str = Field(sa_column=Column(String, nullable=False, unique=True, index=True))
 
@@ -43,7 +43,7 @@ class Employees(SQLModel, table=True):
     grade: str = Field(sa_column=Column(String, nullable=False))
     leave_policy_group: str = Field(sa_column=Column(String, nullable=False))
 
-    manager_id: Optional[int] = Field(
+    manager_id: Optional[str] = Field(
         default=None,
         sa_column=Column(
             ForeignKey("public.employees.employee_id", ondelete="SET NULL"),
@@ -56,7 +56,7 @@ class LeaveBalances(SQLModel, table=True):
     __tablename__ = "leave_balances"
     __table_args__ = {"schema": "public"}
 
-    employee_id: int = Field(
+    employee_id: str = Field(
         sa_column=Column(
             String, 
             ForeignKey("public.employees.employee_id", ondelete="CASCADE"),
@@ -82,7 +82,7 @@ class Cases(SQLModel, table=True):
     default_factory=lambda: str(uuid.uuid4()),
     primary_key=True
 )
-    requester_id: int = Field(
+    requester_id: str = Field(
         sa_column=Column(
             ForeignKey("public.employees.employee_id", ondelete="RESTRICT"),
             nullable=False,

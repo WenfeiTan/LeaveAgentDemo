@@ -10,9 +10,9 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool
 
-from tool.tools import directory_lookup, case_create, case_get, case_update
+from tool.tools import directory_lookup, case_create, case_get, case_update, policy_lookup, eligibility_engine
 
-TOOLS: List[BaseTool] = [directory_lookup, case_create, case_get, case_update]
+TOOLS: List[BaseTool] = [policy_lookup, directory_lookup, case_create, case_get, case_update, eligibility_engine]
 TOOL_MAP = {t.name: t for t in TOOLS}
 
 
@@ -22,6 +22,7 @@ You are an HR Agent Orchestrator for a Leave Management System.
 Rules:
 1. Always use tools when accessing employee data or cases.
 2. Never fabricate employee information.
+2.1 Eligibility decisions must use eligibility_engine (deterministic). Do not infer by yourself.
 3. If creating a case, default status should be DRAFT unless user explicitly asks to submit. If required information is missing, ask user before calling tools.
 Never call case_create without requester_id.
 4. Prefer lookup by email if provided.
