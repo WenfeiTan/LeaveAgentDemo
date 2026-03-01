@@ -11,9 +11,6 @@ import requests
 
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ASSET_REGISTRY_PATH = Path(
-    os.getenv("POLICY_ASSET_REGISTRY", str(PROJECT_ROOT / "be" / "policies" / "assets_registry.json"))
-)
 
 
 def _normalize_payload_json(payload_json: Optional[Union[Dict[str, Any], str]]) -> Dict[str, Any]:
@@ -47,11 +44,13 @@ def _tokenize(text: str) -> List[str]:
     return [t for t in normalized.split() if t]
 
 
-def _load_asset_registry() -> List[Dict[str, Any]]:
-    if not ASSET_REGISTRY_PATH.exists():
-        return []
-    data = json.loads(ASSET_REGISTRY_PATH.read_text(encoding="utf-8"))
-    assets = data.get("assets", [])
+def _load_assets_from_api(policy_group: str) -> List[Dict[str, Any]]:
+    url = f"{API_BASE}/policy-assets/list"
+    body = {"policy_group": policy_group}
+    r = requests.post(url, json=body, timeout=10)
+    r.raise_for_status()
+    payload = r.json()
+    assets = payload.get("assets", [])
     return assets if isinstance(assets, list) else []
 
 
@@ -71,7 +70,7 @@ def _rank_assets(
     answer_text: Optional[str] = None,
     top_k: int = 2,
 ) -> Dict[str, Any]:
-    assets = _load_asset_registry()
+    assets = _load_assets_from_api(policy_group)
     query_tokens = set(_tokenize(intent))
     answer_tokens = set(_tokenize(answer_text or ""))
     cited_doc_set = {d.strip() for d in (cited_docs or []) if str(d).strip()}

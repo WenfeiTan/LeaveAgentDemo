@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -24,11 +25,11 @@ def _extract_policy_asset_elements(delta_messages: List[BaseMessage]) -> List[cl
                 call_id_to_name[str(tc.get("id"))] = str(tc.get("name"))
         elif isinstance(m, ToolMessage):
             tool_name = call_id_to_name.get(str(m.tool_call_id))
-            if tool_name != "policy_and_asset_lookup":
+            if tool_name not in {"policy_and_asset_lookup", "policy_asset_lookup"}:
                 continue
             try:
                 payload = json.loads(str(m.content))
-                rows = payload.get("recommended_assets", [])
+                rows = payload.get("recommended_assets", payload.get("assets", []))
                 if isinstance(rows, list):
                     assets.extend([r for r in rows if isinstance(r, dict)])
             except Exception:
@@ -47,7 +48,9 @@ def _extract_policy_asset_elements(delta_messages: List[BaseMessage]) -> List[cl
 
         title = str(a.get("title") or p.name)
         mime = str(a.get("mime_type") or "")
-        if mime.startswith("image/"):
+        ext = p.suffix.lower()
+        is_image = mime.startswith("image/") or ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        if is_image:
             elements.append(cl.Image(name=title, path=str(p), display="inline"))
             elements.append(cl.File(name=f"{title} (download)", path=str(p), display="inline"))
         else:
@@ -84,6 +87,7 @@ async def on_chat_start() -> None:
         "policy_group",
         profile.get("employee_profile", {}).get("leave_policy_group", "FTE_CN_GZ"),
     )
+    _append_log(log_path, "SESSION_READY", f"name={name}, sso_email={sso_email}")
 
     await cl.Message(
         content=(
@@ -104,23 +108,31 @@ async def on_message(message: cl.Message) -> None:
         await cl.Message(content="会话未初始化，请刷新页面重试。",).send()
         return
 
-    _append_log(log_path, "USER", message.content)
-    normalized_text = _normalize_user_turn(messages, message.content)
-    _append_log(log_path, "USER_NORMALIZED", normalized_text)
-    prev_len = len(messages)
-    messages = [*messages, HumanMessage(content=normalized_text)]
+    try:
+        _append_log(log_path, "USER", message.content)
+        normalized_text = _normalize_user_turn(messages, message.content)
+        _append_log(log_path, "USER_NORMALIZED", normalized_text)
+        _append_log(log_path, "APP_INVOKE_START", f"message_count_before={len(messages)}")
 
-    out = app.invoke({"messages": messages})
-    messages = out["messages"]
-    cl.user_session.set("messages", messages)
-    delta_messages = messages[prev_len:]
+        prev_len = len(messages)
+        messages = [*messages, HumanMessage(content=normalized_text)]
 
-    last = messages[-1]
-    if isinstance(last, AIMessage):
-        content = str(last.content)
-    else:
-        content = "已处理。"
+        out = app.invoke({"messages": messages})
+        messages = out["messages"]
+        cl.user_session.set("messages", messages)
+        delta_messages = messages[prev_len:]
+        _append_log(log_path, "APP_INVOKE_END", f"message_count_after={len(messages)}")
 
-    _append_log(log_path, "ASSISTANT_FINAL", content)
-    elements = _extract_policy_asset_elements(delta_messages)
-    await cl.Message(content=content, elements=elements).send()
+        last = messages[-1]
+        if isinstance(last, AIMessage):
+            content = str(last.content)
+        else:
+            content = "已处理。"
+
+        _append_log(log_path, "ASSISTANT_FINAL", content)
+        elements = _extract_policy_asset_elements(delta_messages)
+        await cl.Message(content=content, elements=elements).send()
+    except Exception as e:
+        err = f"{e}\n\n{traceback.format_exc()}"
+        _append_log(log_path, "ON_MESSAGE_ERROR", err)
+        await cl.Message(content=f"处理请求时发生错误：{e}").send()
