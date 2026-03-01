@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from be.config.db import get_session
-from be.model.schemas import PolicyIngestRequest, PolicyRetrieveRequest
+from be.model.schemas import PolicyIngestRequest, PolicyRetrieveRequest, PolicyRetrieveResponse
 from be.services.policy_rag import policy_rag_service
 
 router = APIRouter(prefix="/policy", tags=["policy"])
@@ -27,7 +27,7 @@ def ingest_policy(payload: PolicyIngestRequest, session: Session = Depends(get_s
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.post("/retrieve")
+@router.post("/retrieve", response_model=PolicyRetrieveResponse)
 def retrieve_policy(payload: PolicyRetrieveRequest, session: Session = Depends(get_session)):
     if payload.top_k <= 0 or payload.top_k > 10:
         raise HTTPException(status_code=400, detail="top_k must be between 1 and 10")

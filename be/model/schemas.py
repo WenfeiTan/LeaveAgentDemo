@@ -71,3 +71,18 @@ class PolicyRetrieveRequest(BaseModel):
     policy_group: str = Field(..., examples=["FTE_CN_GZ"])
     query: str
     top_k: int = 4
+
+
+class PolicyChunkItem(BaseModel):
+    chunk_id: int
+    doc_name: str
+    chunk_index: int
+    content: str
+    score: float
+
+
+class PolicyRetrieveResponse(BaseModel):
+    policy_group: str
+    query: str
+    top_k: int
+    chunks: List[PolicyChunkItem]

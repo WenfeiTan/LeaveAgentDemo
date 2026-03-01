@@ -14,7 +14,7 @@ from langgraph.graph import StateGraph, START, END
 
 from tool.tools import (
     directory_lookup,
-    policy_lookup,
+    policy_and_asset_lookup,
     leave_balance_lookup,
     case_create,
     case_update,
@@ -24,7 +24,7 @@ from tool.tools import (
 
 TOOLS: List[BaseTool] = [
     directory_lookup,
-    policy_lookup,
+    policy_and_asset_lookup,
     leave_balance_lookup,
     case_create,
     case_update,
@@ -60,7 +60,7 @@ General Rule (must follow):
 3) Classify request:
    - QA: asks for information/explanation/policy/org structure/benefits.
    - Action: asks system to do something (create/update/submit a case).
-4) For QA, always call policy_lookup first before final answer.
+4) For QA, always call policy_and_asset_lookup first before final answer.
 5) For Action, validate with policy evidence when relevant, then execute tools.
 6) Before submitting (case_update to PENDING_APPROVAL), ask confirmation once.
 7) Minimize repeated questions. Ask clarification only when required fields are missing.
@@ -68,10 +68,11 @@ General Rule (must follow):
 9) Default today as {today_str}. If user gives partial date (e.g. 3/5), infer year from today and keep future-oriented.
 
 Retrieval Strategy (important):
-- If the user asks org/grade/HRBP/department questions, run policy_lookup with rewritten internal query terms like:
-  "org hierarchy", "grade framework", "department definition", "HRBP belonging".
-- If first retrieval is weak or off-topic, run a second policy_lookup with a refined query before saying unsupported.
+- For QA, run policy_and_asset_lookup with a focused retrieval query derived from user intent.
+- If first retrieval is weak or off-topic, run a second policy_and_asset_lookup with a refined query before saying unsupported.
 - Only say unsupported when two retrieval attempts still cannot provide relevant evidence.
+- If visualization would help, use recommended_assets from policy_and_asset_lookup.
+- Never output "unsupported/not available" for QA before at least one policy_and_asset_lookup result is received in the same turn.
 
 User Identity (trusted):
 - employee_id: {employee.get('employee_id')}
@@ -87,7 +88,7 @@ User Identity (trusted):
 
 Available tools and what each does:
 - directory_lookup(lookup_by, value): query employee profile + manager + skip-manager + HRBP.
-- policy_lookup(policy_group, query, top_k): retrieve internal policy chunks with similarity scores.
+- policy_and_asset_lookup(policy_group, query, top_k, asset_top_k): retrieve policy chunks and doc-grounded recommended assets together.
 - leave_balance_lookup(employee_id, leave_type): query actual leave balance in system. leave type only can be ANNUAL or SICK.
 - case_create(requester_id, case_type, payload_json): create DRAFT case.
 - case_update(case_id, status, payload_json?): update case status/payload.
@@ -98,6 +99,40 @@ class PolicyRetrieveRequest(BaseModel):
     policy_group: str
     query: str
     top_k: int = 4
+
+class PolicyChunkItem(BaseModel):
+    chunk_id: int
+    doc_name: str
+    chunk_index: int
+    content: str
+    score: float
+
+class AssetScoreDetail(BaseModel):
+    doc_overlap_score: float
+    intent_match_score: float
+    answer_match_score: float
+    intent_match_count: int
+    answer_match_count: int
+    matched_docs: list[str]
+
+class RecommendedAsset(BaseModel):
+    asset_id: str
+    title: str
+    description: str
+    mime_type: str
+    file_path: str
+    related_docs: list[str]
+    score: float
+    score_detail: AssetScoreDetail
+
+class PolicyAndAssetLookupResponse(BaseModel):
+    policy_group: str
+    query: str
+    top_k: int
+    chunks: list[PolicyChunkItem]
+    cited_docs: list[str]
+    recommended_assets: list[RecommendedAsset]
+    asset_top_k: int
 
 class PersonProfile(BaseModel):
     employee_id: str
