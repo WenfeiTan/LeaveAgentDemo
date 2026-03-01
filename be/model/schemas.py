@@ -71,3 +71,39 @@ class PolicyRetrieveRequest(BaseModel):
     policy_group: str = Field(..., examples=["FTE_CN_GZ"])
     query: str
     top_k: int = 4
+
+
+class PolicyChunkItem(BaseModel):
+    chunk_id: int
+    doc_name: str
+    chunk_index: int
+    content: str
+    score: float
+
+
+class PolicyRetrieveResponse(BaseModel):
+    policy_group: str
+    query: str
+    top_k: int
+    chunks: List[PolicyChunkItem]
+
+
+class PolicyAssetItem(BaseModel):
+    asset_id: str
+    policy_group: str
+    title: str
+    description: str
+    mime_type: str
+    file_path: str
+    tags: List[str] = Field(default_factory=list)
+    related_docs: List[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class PolicyAssetListRequest(BaseModel):
+    policy_group: str = Field(..., examples=["FTE_CN_GZ"])
+
+
+class PolicyAssetListResponse(BaseModel):
+    policy_group: str
+    assets: List[PolicyAssetItem]

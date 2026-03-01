@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 import uuid
 
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, String, DateTime, Float, ForeignKey, Integer, Text
+from sqlalchemy import Column, String, DateTime, Float, ForeignKey, Integer, Text, Boolean
 from sqlalchemy.types import UserDefinedType
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
@@ -118,4 +118,25 @@ class PolicyChunks(SQLModel, table=True):
     embedding: str = Field(sa_column=Column(VectorType(3072), nullable=False))
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    )
+
+
+class PolicyAssets(SQLModel, table=True):
+    __tablename__ = "policy_assets"
+    __table_args__ = {"schema": "public"}
+
+    asset_id: str = Field(sa_column=Column(String, primary_key=True))
+    policy_group: str = Field(sa_column=Column(String, nullable=False, index=True))
+    title: str = Field(sa_column=Column(String, nullable=False))
+    description: str = Field(sa_column=Column(Text, nullable=False, default=""))
+    mime_type: str = Field(sa_column=Column(String, nullable=False))
+    file_path: str = Field(sa_column=Column(Text, nullable=False))
+    tags: list = Field(sa_column=Column(JSONB, nullable=False, default=list))
+    related_docs: list = Field(sa_column=Column(JSONB, nullable=False, default=list))
+    is_active: bool = Field(sa_column=Column(Boolean, nullable=False, default=True))
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     )
